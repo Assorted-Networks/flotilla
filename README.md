@@ -261,7 +261,7 @@ docker compose start node-b-agent     # and it rejoins
 
 ```bash
 pip install -r requirements.txt
-python -m unittest discover -s tests -t .      # 91 tests, about 20 s
+python -m unittest discover -s tests -t .      # 93 tests, about 20 s
 ```
 
 The tests include unit tests for parsing, config, scheduling and every

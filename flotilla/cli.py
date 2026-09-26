@@ -34,12 +34,16 @@ def _die(message: str, code: int = 1) -> None:
     raise SystemExit(code)
 
 
-def _get(args, path: str) -> dict:
+def _request(args, method: str, path: str, **kw) -> httpx.Response:
     try:
         with _http(args) as c:
-            r = c.get(path)
+            return c.request(method, path, **kw)
     except httpx.HTTPError as exc:
         _die(f"cannot reach coordinator at {args.url}: {exc}")
+
+
+def _get(args, path: str) -> dict:
+    r = _request(args, "GET", path)
     if r.status_code >= 400:
         _die(f"HTTP {r.status_code}: {r.text[:500]}")
     return r.json()
@@ -128,11 +132,7 @@ def cmd_run(args) -> None:
         body["model"] = args.model
     else:
         body["team"] = args.team
-    try:
-        with _http(args) as c:
-            r = c.post("/api/tasks", json=body)
-    except httpx.HTTPError as exc:
-        _die(f"cannot reach coordinator at {args.url}: {exc}")
+    r = _request(args, "POST", "/api/tasks", json=body)
     if r.status_code >= 400:
         _die(f"HTTP {r.status_code}: {r.text[:500]}")
     task = r.json()
@@ -158,8 +158,7 @@ def cmd_pull(args) -> None:
     body = {"model": args.model}
     if args.node:
         body["nodes"] = args.node
-    with _http(args) as c:
-        r = c.post("/api/pull", json=body)
+    r = _request(args, "POST", "/api/pull", json=body)
     if r.status_code >= 400:
         _die(f"HTTP {r.status_code}: {r.text[:500]}")
     for node, res in r.json()["nodes"].items():
@@ -167,9 +166,14 @@ def cmd_pull(args) -> None:
 
 
 def cmd_reload(args) -> None:
-    with _http(args) as c:
-        r = c.post("/api/config/reload")
-    data = r.json()
+    r = _request(args, "POST", "/api/config/reload")
+    try:
+        data = r.json()
+    except ValueError:
+        data = {}
+    # An invalid file comes back as 400 with `problems`; show other errors (401, 5xx) as they are.
+    if r.status_code >= 400 and "problems" not in data:
+        _die(f"HTTP {r.status_code}: {r.text[:500]}")
     if not data.get("ok"):
         print("reload failed:", file=sys.stderr)
         for p in data.get("problems", []):

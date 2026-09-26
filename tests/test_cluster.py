@@ -1,13 +1,15 @@
 """End-to-end tests: coordinator, agents and fake backends as separate processes."""
 
-import json
+import os
+import subprocess
+import sys
 import threading
 import time
 import unittest
 
 import httpx
 
-from tests.cluster import Cluster, parse_sse
+from tests.cluster import ROOT, Cluster, parse_sse
 
 NODES = {
     # Every small model lives on at least two machines, so any one can fail.
@@ -124,6 +126,17 @@ class ClusterTests(LogOnFailure, unittest.TestCase):
         text = "".join(e["choices"][0]["delta"].get("content") or "" for e in events if isinstance(e, dict) and e.get("choices"))
         self.assertTrue(text.startswith("Answer from qwen3.5:4b@fake-"), text)
         self.assertTrue(all(e["model"] == "qwen3.5:4b" for e in events if isinstance(e, dict)))
+        # Like OpenAI, a usage-only chunk (no choices) only goes to clients that ask for it.
+        self.assertTrue(all(e["choices"] for e in events if isinstance(e, dict)), events)
+        with self.cluster.client() as c:
+            with c.stream("POST", "/v1/chat/completions", json={
+                "model": "qwen3.5:4b", "stream": True, "stream_options": {"include_usage": True},
+                "messages": [{"role": "user", "content": "hi"}],
+            }) as resp:
+                events = parse_sse(resp.read().decode())
+        usage_chunks = [e for e in events if isinstance(e, dict) and not e["choices"]]
+        self.assertEqual(len(usage_chunks), 1, events)
+        self.assertGreater(usage_chunks[0]["usage"]["total_tokens"], 0)
 
     def test_embeddings(self):
         with self.cluster.client() as c:
@@ -137,9 +150,18 @@ class ClusterTests(LogOnFailure, unittest.TestCase):
         self.assertEqual(r.json()["error"]["code"], "model_not_found")
 
     def test_bad_requests(self):
+        user = [{"role": "user", "content": "hi"}]
         with self.cluster.client() as c:
             self.assertEqual(c.post("/v1/chat/completions", content=b"{not json").status_code, 400)
             self.assertEqual(c.post("/v1/chat/completions", json={"model": "team/moa", "messages": []}).status_code, 400)
+            r = c.post("/v1/chat/completions", json={"model": 5, "messages": user})
+            self.assertEqual((r.status_code, r.json()["error"]["type"]), (400, "invalid_request_error"))
+            self.assertEqual(c.post("/api/tasks", json={"model": 123, "prompt": "hi"}).status_code, 400)
+            self.assertEqual(c.post("/api/tasks", json={"team": ["moa"], "prompt": "hi"}).status_code, 400)
+            self.assertEqual(c.get("/api/tasks?limit=abc").status_code, 400)
+            # A malformed optional field does not break the request.
+            r = c.post("/v1/chat/completions", json={"model": "team/vote", "stream_options": "yes", "messages": user})
+            self.assertEqual(r.status_code, 200, r.text)
 
     def test_api_key_required(self):
         with httpx.Client(base_url=self.cluster.url, trust_env=False) as c:
@@ -227,6 +249,23 @@ class ClusterTests(LogOnFailure, unittest.TestCase):
         self.cluster.wait_for(
             lambda: "smollm2:1.7b" in [m["name"] for m in self.cluster.node("node-c")["models"]], 10, "pulled model",
         )
+        with self.cluster.client() as c:
+            # One node name as a plain string; unknown names are reported, not skipped silently.
+            r = c.post("/api/pull", json={"model": "smollm2:1.7b", "nodes": "node-c"})
+            self.assertEqual(r.json()["nodes"], {"node-c": {"ok": True, "status": "present"}})
+            r = c.post("/api/pull", json={"model": "smollm2:1.7b", "nodes": ["no-such-node"]})
+            self.assertEqual(r.json()["nodes"], {"no-such-node": {"ok": False, "error": "unknown node"}})
+            self.assertEqual(c.post("/api/pull", json={"model": "x", "nodes": {"a": 1}}).status_code, 400)
+
+    def test_cli_reports_http_errors(self):
+        env = {k: v for k, v in os.environ.items() if not k.lower().endswith("_proxy") and not k.startswith("FLOTILLA_")}
+        env["PYTHONPATH"] = str(ROOT)
+        for cmd in (["reload"], ["pull", "some-model"]):
+            with self.subTest(cmd=cmd[0]):
+                out = subprocess.run([sys.executable, "-m", "flotilla", *cmd, "--url", self.cluster.url, "--key", "wrong"],
+                                     capture_output=True, text=True, cwd=str(ROOT), env=env, timeout=30)
+                self.assertNotEqual(out.returncode, 0)
+                self.assertIn("HTTP 401", out.stderr)
 
     def test_client_disconnect_cancels_team(self):
         with self.cluster.client() as c:

@@ -170,6 +170,18 @@ class RegistryTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             reg.upsert_agent(hb("s", ["m"]), None)             # name taken by a static node
 
+    async def test_static_agent_uses_cluster_token(self):
+        nodes = [
+            StaticNodeConfig(name="agent", url="http://a:8801", kind="agent"),
+            StaticNodeConfig(name="agent-key", url="http://b:8801", kind="agent", api_key="own"),
+            StaticNodeConfig(name="plain", url="http://c:8000", kind="openai"),
+        ]
+        reg = self.make(static_nodes=nodes)
+        keys = {n: reg.nodes[n].api_key for n in ("agent", "agent-key", "plain")}
+        self.assertEqual(keys, {"agent": "tok", "agent-key": "own", "plain": None})
+        reg.reconfigure(ClusterConfig(static_nodes=nodes))    # an unchanged node keeps its key
+        self.assertEqual(reg.nodes["agent"].api_key, "tok")
+
     async def test_speed_breaks_ties(self):
         reg = self.make()
         reg.upsert_agent(hb("slow", ["m"]), None)

@@ -66,6 +66,10 @@ cluster:
       models: [qwen3.5-4b]              # optional: fixed list when discovery is not possible
 ```
 
+`kind: agent` points at a Flotilla agent that does not register itself (no
+`FLOTILLA_COORDINATOR_URL`); the coordinator sends it `FLOTILLA_CLUSTER_TOKEN`
+unless `api_key` is set.
+
 Prefer agents where you can: they keep the model server private, report load
 and loaded models, and can download models on request.
 

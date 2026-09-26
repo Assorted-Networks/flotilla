@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flotilla</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M4 21h24l-4 6H8z' fill='%232f6fdb'/%3E%3Cpath d='M15 4v15H7z' fill='%2394b4ee'/%3E%3Cpath d='M17 8v11h7z' fill='%232f6fdb'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --panel-2: #f0f2f5; --text: #1b1f24; --muted: #5d6673;
+    --line: #dde1e7; --accent: #2f6fdb; --on-accent: #ffffff; --accent-soft: #e3ecfb; --ok: #1f8a4c; --ok-soft: #dff3e7;
+    --warn: #a86400; --warn-soft: #fbefd9; --err: #c0392b; --err-soft: #f9e0dd;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111418; --panel: #1a1e24; --panel-2: #222731; --text: #e6e9ee; --muted: #9aa4b2;
+      --line: #2e3440; --accent: #6b9cf0; --on-accent: #0c1424; --accent-soft: #1f2d45; --ok: #4cc47f; --ok-soft: #173325;
+      --warn: #e0a54a; --warn-soft: #3a2c14; --err: #ef7a6c; --err-soft: #3d1f1c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header.top { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 5; }
+  .brand { display: flex; align-items: center; gap: 8px; font-size: 17px; }
+  .brand svg { width: 24px; height: 24px; }
+  .stats { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; }
+  .muted { color: var(--muted); }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px; background: var(--panel-2); font-size: 12.5px; white-space: nowrap; }
+  .pill.ok { background: var(--ok-soft); color: var(--ok); }
+  .pill.warn { background: var(--warn-soft); color: var(--warn); }
+  .pill.err { background: var(--err-soft); color: var(--err); }
+  .pill.run { background: var(--accent-soft); color: var(--accent); }
+  button, select, input, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; border: 1px solid var(--accent); background: var(--accent); color: var(--on-accent); border-radius: 8px; padding: 7px 14px; }
+  button.ghost { background: transparent; color: var(--text); border-color: var(--line); }
+  button:disabled { opacity: .55; cursor: default; }
+  select, input, textarea { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; }
+  textarea { width: 100%; resize: vertical; }
+  main { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 16px; padding: 16px; max-width: 1500px; margin: 0 auto; }
+  main > .wide { grid-column: 1 / -1; }
+  aside { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  @media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; min-width: 0; }
+  h2 { font-size: 15px; margin: 0 0 10px; }
+  h3 { font-size: 13px; margin: 16px 0 6px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  .row { display: flex; gap: 8px; margin-bottom: 8px; }
+  .row select { flex: 1; min-width: 0; }
+  .node { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; }
+  .node-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .swatch { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+  .node-name { font-weight: 600; }
+  .node-url { font-family: var(--mono); font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+  .slots { display: flex; gap: 3px; margin: 8px 0 6px; }
+  .slot { height: 6px; flex: 1; border-radius: 3px; background: var(--panel-2); }
+  .slot.busy { background: var(--accent); }
+  .chips { display: flex; flex-wrap: wrap; gap: 5px; }
+  .chip { font-family: var(--mono); font-size: 11.5px; padding: 1px 7px; border-radius: 6px; background: var(--panel-2); }
+  .chip.hot { background: var(--accent-soft); color: var(--accent); }
+  .small { font-size: 12px; }
+  .errtext { color: var(--err); font-size: 12px; overflow-wrap: anywhere; }
+  .team { padding: 8px 0; border-top: 1px solid var(--line); }
+  .team:first-child { border-top: 0; padding-top: 0; }
+  .team-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .team-id { font-family: var(--mono); font-weight: 600; }
+  .gantt { position: relative; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; background: var(--panel-2); }
+  .lane { display: grid; grid-template-columns: 110px minmax(0, 1fr); align-items: start; gap: 8px; padding: 3px 0; }
+  .lane-name { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: center; gap: 6px; height: 18px; }
+  .track { position: relative; }
+  .bar { position: absolute; height: 18px; border-radius: 4px; font-size: 11px; line-height: 18px; padding: 0 5px; color: #fff; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 3px; }
+  .bar.running { background-image: repeating-linear-gradient(45deg, rgba(255,255,255,.18) 0 6px, transparent 6px 12px); }
+  .bar.error { background: var(--err) !important; }
+  .axis { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 8px; font-size: 11px; color: var(--muted); }
+  @media (max-width: 600px) { .lane, .axis { grid-template-columns: 76px minmax(0, 1fr); } }
+  td.small { white-space: nowrap; }
+  .axis div:last-child { display: flex; justify-content: space-between; }
+  ol.steps { list-style: none; margin: 0; padding: 0; }
+  ol.steps li { border-bottom: 1px solid var(--line); padding: 6px 0; }
+  .step-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; cursor: pointer; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; transform: translateY(-1px); }
+  .dot.ok { background: var(--ok); } .dot.error { background: var(--err); } .dot.running { background: var(--accent); animation: pulse 1s infinite alternate; }
+  @keyframes pulse { from { opacity: .35; } to { opacity: 1; } }
+  .step-label { font-weight: 600; }
+  .step-where { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .step-meta { margin-left: auto; font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .step-body { display: none; margin: 6px 0 2px 16px; }
+  li.open > .step-body { display: block; }
+  pre.out { white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--mono); font-size: 12.5px; background: var(--panel-2); border-radius: 8px; padding: 8px 10px; margin: 4px 0; max-height: 360px; overflow: auto; }
+  li.note { color: var(--muted); font-size: 12.5px; font-style: italic; }
+  .answer { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--panel-2); border-radius: 10px; padding: 12px 14px; min-height: 48px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 12px; color: var(--muted); font-weight: 600; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: var(--panel-2); }
+  td.preview { max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .table-wrap { overflow-x: auto; }
+  .empty { color: var(--muted); padding: 8px 0; }
+  dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--text); max-width: 420px; width: calc(100% - 32px); }
+  dialog::backdrop { background: rgba(0,0,0,.35); }
+  dialog input { width: 100%; margin: 8px 0 12px; }
+  .banner { margin: 16px 16px 0; padding: 10px 14px; border-radius: 10px; background: var(--err-soft); color: var(--err); display: none; }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 21h24l-4 6H8z" fill="#2f6fdb"/><path d="M15 4v15H7z" fill="#94b4ee"/><path d="M17 8v11h7z" fill="#2f6fdb"/></svg>
+    <b>Flotilla</b> <span id="cluster-name" class="muted"></span>
+  </div>
+  <div class="stats" id="stats"></div>
+  <button id="key-btn" class="ghost" type="button">API key</button>
+</header>
+<div class="banner" id="banner"></div>
+<main>
+  <section class="card" id="play">
+    <h2>Run a task</h2>
+    <form id="run-form">
+      <div class="row">
+        <select id="target" aria-label="Team or model"></select>
+        <button type="submit" id="run-btn">Run</button>
+      </div>
+      <textarea id="prompt" rows="4" placeholder="Ask the team something. Ctrl+Enter runs it."></textarea>
+    </form>
+    <div id="task-view" hidden>
+      <h3>Task</h3>
+      <div class="row small"><span id="task-status" class="pill"></span><span id="task-meta" class="muted"></span></div>
+      <h3>Machines over time</h3>
+      <div id="gantt" class="gantt"></div>
+      <h3>Steps</h3>
+      <ol id="steps" class="steps"></ol>
+      <h3>Answer</h3>
+      <div id="answer" class="answer"></div>
+    </div>
+  </section>
+  <aside>
+    <section class="card"><h2>Machines</h2><div id="nodes"><div class="empty">Loading…</div></div></section>
+    <section class="card"><h2>Teams</h2><div id="teams"><div class="empty">Loading…</div></div></section>
+  </aside>
+  <section class="card wide">
+    <h2>Recent tasks</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>When</th><th>Target</th><th>Status</th><th>Time</th><th>Machines</th><th>Tokens</th><th>Request</th></tr></thead>
+        <tbody id="recent"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+<dialog id="key-dialog">
+  <form method="dialog" id="key-form">
+    <h2>API key</h2>
+    <div class="muted small">This coordinator requires a key (one of FLOTILLA_API_KEYS). It is kept in this browser only.</div>
+    <input id="key-input" type="password" autocomplete="off" placeholder="Paste the key">
+    <div class="row" style="justify-content:flex-end"><button class="ghost" value="cancel" type="submit">Cancel</button><button value="save" type="submit">Save</button></div>
+  </form>
+</dialog>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const PALETTE = ["#2f6fdb", "#1f8a4c", "#b3541e", "#7b4bc4", "#0e8a8a", "#b8327a", "#6b7b1f", "#4c5b75"];
+const nodeColors = {};
+let knownNodes = [];
+let current = null;          // task being shown
+let watchAbort = null;
+
+function colorFor(node) {
+  if (!node) return "#8a93a0";
+  if (!(node in nodeColors)) nodeColors[node] = PALETTE[Object.keys(nodeColors).length % PALETTE.length];
+  return nodeColors[node];
+}
+
+function el(tag, attrs, ...children) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v === null || v === undefined || v === false) continue;
+    if (k === "class") e.className = v;
+    else if (k === "style") e.style.cssText = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else e.setAttribute(k, v === true ? "" : v);
+  }
+  for (const c of children.flat()) {
+    if (c === null || c === undefined || c === false) continue;
+    e.append(c instanceof Node ? c : document.createTextNode(String(c)));
+  }
+  return e;
+}
+
+function getKey() { try { return localStorage.getItem("flotilla.key") || ""; } catch (e) { return ""; } }
+function setKey(k) { try { localStorage.setItem("flotilla.key", k); } catch (e) { /* private mode */ } }
+
+async function api(path, opts = {}) {
+  const headers = Object.assign({ "content-type": "application/json" }, opts.headers || {});
+  const key = getKey();
+  if (key) headers.authorization = "Bearer " + key;
+  const res = await fetch(path, Object.assign({}, opts, { headers }));
+  if (res.status === 401) { askKey(); throw new Error("API key required"); }
+  return res;
+}
+
+function askKey() {
+  const d = $("key-dialog");
+  if (!d.open) { $("key-input").value = getKey(); d.showModal(); }
+}
+$("key-btn").addEventListener("click", askKey);
+$("key-dialog").addEventListener("close", () => {
+  if ($("key-dialog").returnValue === "save") { setKey($("key-input").value.trim()); refreshAll(); }
+});
+
+function banner(msg) {
+  const b = $("banner");
+  b.textContent = msg || "";
+  b.style.display = msg ? "block" : "none";
+}
+
+function ago(ts) {
+  if (!ts) return "";
+  const s = Math.max(0, Date.now() / 1000 - ts);
+  if (s < 60) return Math.round(s) + "s ago";
+  if (s < 3600) return Math.round(s / 60) + "m ago";
+  if (s < 86400) return Math.round(s / 3600) + "h ago";
+  return new Date(ts * 1000).toLocaleDateString();
+}
+
+function statusPill(status) {
+  const cls = { online: "ok", ok: "ok", running: "run", cooldown: "warn", unreachable: "err", offline: "err", error: "err", cancelled: "warn" }[status] || "";
+  return el("span", { class: "pill " + cls }, status);
+}
+
+// ---------------------------------------------------------------- cluster
+
+async function refreshCluster() {
+  let data;
+  try {
+    const res = await api("/api/cluster");
+    data = await res.json();
+    banner("");
+  } catch (e) {
+    banner("Cannot load cluster state: " + e.message);
+    return;
+  }
+  $("cluster-name").textContent = data.cluster + " · v" + data.version;
+  const t = data.totals;
+  const models = Object.keys(data.models).length;
+  $("stats").replaceChildren(
+    el("span", { class: "pill " + (t.online === t.nodes && t.nodes ? "ok" : t.online ? "warn" : "err") }, `${t.online}/${t.nodes} machines online`),
+    el("span", { class: "pill" }, `${t.in_flight}/${t.slots} slots busy`),
+    el("span", { class: "pill" }, `${models} models`),
+  );
+  knownNodes = data.nodes.map((n) => n.name);
+  knownNodes.forEach(colorFor);
+  const box = $("nodes");
+  if (!data.nodes.length) {
+    box.replaceChildren(el("div", { class: "empty" }, "No machines yet. Start an agent with FLOTILLA_COORDINATOR_URL pointing here."));
+    return;
+  }
+  box.replaceChildren(...data.nodes.map((n) => {
+    const loaded = new Set(n.loaded_models || []);
+    const hw = n.hardware || {};
+    const hwText = [
+      hw.cpus ? hw.cpus + " CPU" : null,
+      hw.memory_gb ? hw.memory_gb + " GB RAM" : null,
+      ...(hw.gpus || []).map((g) => `${g.name} (${g.memory_gb} GB)`),
+    ].filter(Boolean).join(" · ");
+    const labels = Object.entries(n.labels || {}).map(([k, v]) => `${k}=${v}`).join(", ");
+    return el("div", { class: "node" },
+      el("div", { class: "node-head" },
+        el("span", { class: "swatch", style: "background:" + colorFor(n.name) }),
+        el("span", { class: "node-name" }, n.name), statusPill(n.status),
+        el("span", { class: "muted small" }, n.static ? n.kind + " (static)" : (n.backend || "")),
+      ),
+      el("div", { class: "node-url" }, n.url),
+      el("div", { class: "slots", title: `${n.in_flight} of ${n.capacity} slots busy` },
+        Array.from({ length: n.capacity }, (_, i) => el("div", { class: "slot" + (i < n.in_flight ? " busy" : "") }))),
+      el("div", { class: "chips" }, n.models.length ? n.models.map((m) => el("span", { class: "chip" + (loaded.has(m.name) ? " hot" : ""), title: [m.parameter_size, m.quantization, loaded.has(m.name) ? "in memory" : null].filter(Boolean).join(" · ") }, m.name)) : el("span", { class: "muted small" }, "no models")),
+      hwText || labels ? el("div", { class: "muted small", style: "margin-top:6px" }, [hwText, labels].filter(Boolean).join(" · ")) : null,
+      el("div", { class: "muted small" }, `${n.requests} calls · ${n.failures} failures` + (n.seconds_per_token ? ` · ${(1 / n.seconds_per_token).toFixed(1)} tok/s` : "") + (n.seconds_since_seen !== null ? ` · seen ${ago(n.last_seen)}` : "")),
+      n.last_error && n.status !== "online" ? el("div", { class: "errtext" }, n.last_error) : null,
+    );
+  }));
+}
+
+async function refreshTeams() {
+  let data;
+  try { data = await (await api("/api/teams")).json(); } catch (e) { return; }
+  let models = [];
+  try { models = (await (await api("/v1/models")).json()).data.filter((m) => !m.id.startsWith("team/")).map((m) => m.id); } catch (e) { /* ignore */ }
+  $("teams").replaceChildren(...data.teams.map((t) => el("div", { class: "team" },
+    el("div", { class: "team-head" }, el("span", { class: "team-id" }, t.id), el("span", { class: "pill" }, t.strategy),
+      t.ready ? el("span", { class: "pill ok" }, "ready") : el("span", { class: "pill warn", title: "No online machine has: " + t.missing_models.join(", ") }, "missing models")),
+    t.description ? el("div", { class: "muted small" }, t.description) : null,
+    !t.ready ? el("div", { class: "errtext" }, "Needs one of: " + t.missing_models.join(", ")) : null,
+  )));
+  const sel = $("target");
+  const previous = sel.value;
+  const teams = el("optgroup", { label: "Teams" }, data.teams.map((t) => el("option", { value: "team:" + t.name }, `${t.id}  (${t.strategy})`)));
+  const single = el("optgroup", { label: "Single models" }, models.map((m) => el("option", { value: "model:" + m }, m)));
+  sel.replaceChildren(teams, single);
+  if (previous && [...sel.options].some((o) => o.value === previous)) sel.value = previous;
+}
+
+async function refreshRecent() {
+  let data;
+  try { data = await (await api("/api/tasks?limit=25")).json(); } catch (e) { return; }
+  const body = $("recent");
+  if (!data.tasks.length) { body.replaceChildren(el("tr", {}, el("td", { colspan: 7, class: "empty" }, "No tasks yet."))); return; }
+  body.replaceChildren(...data.tasks.map((t) => el("tr", { onclick: () => openTask(t.id) },
+    el("td", { class: "small" }, ago(t.created_at)),
+    el("td", {}, el("span", { class: "team-id small" }, t.kind === "team" ? "team/" + t.target : t.target)),
+    el("td", {}, statusPill(t.status)),
+    el("td", { class: "small" }, t.seconds ? t.seconds + "s" : ""),
+    el("td", {}, el("div", { class: "chips" }, (t.nodes || []).map((n) => el("span", { class: "chip", style: `border-left:3px solid ${colorFor(n)}` }, n)))),
+    el("td", { class: "small" }, t.usage ? t.usage.total_tokens : ""),
+    el("td", { class: "preview small", title: t.input_preview || "" }, t.input_preview || ""),
+  )));
+}
+
+function refreshAll() { refreshCluster(); refreshTeams(); refreshRecent(); }
+
+// ---------------------------------------------------------------- task view
+
+function newTaskState(id) {
+  return { id, status: "running", target: "", steps: new Map(), order: [], notes: [], answer: "", startedAt: Date.now() / 1000, endedAt: null, usage: null, error: null };
+}
+
+function upsertStep(state, s) {
+  const prev = state.steps.get(s.id) || {};
+  const merged = Object.assign({}, prev, s);
+  if (!state.steps.has(s.id)) state.order.push({ kind: "step", id: s.id });
+  state.steps.set(s.id, merged);
+  return merged;
+}
+
+function applyEvent(state, ev) {
+  switch (ev.type) {
+    case "task.started": state.target = ev.target; state.kind = ev.kind; state.strategy = ev.strategy; state.startedAt = ev.ts; break;
+    case "step.started": upsertStep(state, ev.step); break;
+    case "step.assigned": upsertStep(state, { id: ev.step, node: ev.node, model: ev.model, assigned_at: ev.ts }); break;
+    case "step.completed": case "step.failed": upsertStep(state, ev.step); break;
+    case "step.retry": { const s = state.steps.get(ev.step); if (s) s.note = ev.reason; break; }
+    case "task.note": state.order.push({ kind: "note", text: ev.text, parent: ev.parent }); break;
+    case "task.delta": state.answer += ev.content; break;
+    case "task.completed": case "task.failed":
+      state.status = ev.status; state.endedAt = ev.ts; state.usage = ev.usage; state.error = ev.error;
+      if (ev.output) state.answer = ev.output;
+      break;
+  }
+}
+
+function stateFromRecord(rec) {
+  const st = newTaskState(rec.id);
+  st.target = rec.target; st.kind = rec.kind; st.status = rec.status; st.startedAt = rec.created_at;
+  st.endedAt = rec.finished_at; st.usage = rec.usage; st.error = rec.error; st.answer = rec.output || "";
+  for (const s of rec.step_details || []) upsertStep(st, s);
+  return st;
+}
+
+function render(state) {
+  $("task-view").hidden = false;
+  const status = $("task-status");
+  status.replaceWith(Object.assign(statusPill(state.status), { id: "task-status" }));
+  const secs = ((state.endedAt || Date.now() / 1000) - state.startedAt).toFixed(1);
+  const steps = [...state.steps.values()];
+  const nodes = [...new Set(steps.map((s) => s.node).filter(Boolean))];
+  $("task-meta").textContent = `${state.kind === "team" ? "team/" : ""}${state.target} · ${secs}s · ${steps.length} steps · ${nodes.length} machines` +
+    (state.usage ? ` · ${state.usage.total_tokens} tokens` : "") + ` · ${state.id}`;
+  renderGantt(state, steps);
+  renderSteps(state);
+  const ans = $("answer");
+  ans.textContent = state.answer || (state.status === "running" ? "…" : "");
+  if (state.error) ans.append(el("div", { class: "errtext", style: "margin-top:8px" }, state.error));
+}
+
+function renderGantt(state, steps) {
+  const llm = steps.filter((s) => s.kind === "llm" && (s.assigned_at || s.started_at));
+  const box = $("gantt");
+  if (!llm.length) { box.replaceChildren(el("div", { class: "empty small" }, "Waiting for the first model call…")); return; }
+  const now = Date.now() / 1000;
+  const t0 = state.startedAt;
+  const t1 = Math.max(state.endedAt || now, ...llm.map((s) => s.ended_at || now));
+  const span = Math.max(0.001, t1 - t0);
+  const lanes = [...new Set(llm.map((s) => s.node || "(waiting)"))].sort();
+  const rows = lanes.map((lane) => {
+    // Calls that overlap in time on one machine go on separate sub-rows.
+    const bars = llm.filter((s) => (s.node || "(waiting)") === lane)
+      .map((s) => ({ s, start: (s.assigned_at || s.started_at) - t0, end: (s.ended_at || now) - t0 }))
+      .sort((a, b) => a.start - b.start);
+    const rowEnds = [];
+    for (const b of bars) {
+      let r = rowEnds.findIndex((end) => end <= b.start + 1e-6);
+      if (r === -1) { r = rowEnds.length; rowEnds.push(0); }
+      rowEnds[r] = b.end;
+      b.row = r;
+    }
+    const height = Math.max(1, rowEnds.length) * 22 - 4;
+    return el("div", { class: "lane" },
+      el("div", { class: "lane-name" }, el("span", { class: "swatch", style: "background:" + colorFor(lane === "(waiting)" ? null : lane) }), lane),
+      el("div", { class: "track", style: `height:${height}px` }, bars.map((b) => {
+        const s = b.s;
+        const left = (100 * b.start / span).toFixed(2);
+        const width = Math.max(0.6, 100 * (b.end - b.start) / span).toFixed(2);
+        const cls = "bar" + (s.status === "running" ? " running" : "") + (s.status === "error" ? " error" : "");
+        return el("div", { class: cls, style: `top:${b.row * 22}px;left:${left}%;width:${width}%;background:${colorFor(s.node)}`,
+          title: `${s.label}\n${s.model || s.member}${s.node ? " on " + s.node : ""}\n${(b.end - b.start).toFixed(2)}s` }, s.label);
+      })),
+    );
+  });
+  box.replaceChildren(...rows, el("div", { class: "axis" }, el("div"), el("div", {}, el("span", {}, "0s"), el("span", {}, span.toFixed(1) + "s"))));
+}
+
+function renderSteps(state) {
+  const list = $("steps");
+  const openIds = new Set([...list.querySelectorAll("li.open")].map((li) => li.dataset.id));
+  const depth = (s) => { let d = 0; let p = s.parent; while (p && state.steps.has(p) && d < 6) { d++; p = state.steps.get(p).parent; } return d; };
+  const items = state.order.map((item) => {
+    if (item.kind === "note") {
+      const parent = item.parent && state.steps.get(item.parent);
+      const pad = parent ? (depth(parent) + 1) * 18 : 0;
+      return el("li", { class: "note", style: `padding-left:${pad}px` }, item.text);
+    }
+    const s = state.steps.get(item.id);
+    const where = s.kind === "team" ? s.member : `${s.member} → ${s.model || (s.candidates || []).join(" | ")}${s.node ? " @ " + s.node : ""}`;
+    const tokens = s.usage ? s.usage.completion_tokens + " tok · " : "";
+    const li = el("li", { "data-id": s.id, class: openIds.has(s.id) ? "open" : "", style: `padding-left:${depth(s) * 18}px` },
+      el("div", { class: "step-head", onclick: () => li.classList.toggle("open") },
+        el("span", { class: "dot " + s.status }), el("span", { class: "step-label" }, s.label),
+        el("span", { class: "step-where" }, where), el("span", { class: "step-meta" }, s.seconds ? tokens + s.seconds + "s" : s.status)),
+      el("div", { class: "step-body" },
+        s.error ? el("div", { class: "errtext" }, s.error) : null,
+        s.note ? el("div", { class: "muted small" }, s.note) : null,
+        (s.attempts || []).length ? el("div", { class: "muted small" }, "Failed attempts: " + s.attempts.map((a) => `${a.node} (${a.kind})`).join(", ")) : null,
+        s.reasoning ? el("details", {}, el("summary", { class: "small muted" }, "reasoning"), el("pre", { class: "out" }, s.reasoning)) : null,
+        s.output ? el("pre", { class: "out" }, s.output) : (s.output_preview ? el("pre", { class: "out" }, s.output_preview) : null)),
+    );
+    return li;
+  });
+  list.replaceChildren(...items);
+}
+
+async function watch(taskId) {
+  if (watchAbort) watchAbort.abort();
+  const ctrl = new AbortController();
+  watchAbort = ctrl;
+  const state = newTaskState(taskId);
+  current = state;
+  render(state);
+  const ticker = setInterval(() => { if (current === state && state.status === "running") render(state); }, 500);
+  try {
+    const res = await api(`/api/tasks/${taskId}/events`, { signal: ctrl.signal });
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf("\n\n")) !== -1) {
+        const block = buf.slice(0, idx); buf = buf.slice(idx + 2);
+        const data = block.split("\n").filter((l) => l.startsWith("data:")).map((l) => l.slice(5).trimStart()).join("\n");
+        if (!data) continue;
+        const ev = JSON.parse(data);
+        if (ev.type === "task.snapshot") { Object.assign(state, stateFromRecord(ev.task)); }
+        else applyEvent(state, ev);
+        if (current === state) render(state);
+      }
+    }
+  } catch (e) {
+    if (e.name !== "AbortError") banner("Lost the task stream: " + e.message);
+  } finally {
+    clearInterval(ticker);
+    if (current === state) {
+      try { Object.assign(state, stateFromRecord(await (await api(`/api/tasks/${taskId}`)).json())); render(state); } catch (e) { /* ignore */ }
+    }
+    refreshRecent();
+    refreshCluster();
+  }
+}
+
+async function openTask(taskId) {
+  try {
+    const rec = await (await api(`/api/tasks/${taskId}`)).json();
+    if (rec.status === "running") { watch(taskId); return; }
+    if (watchAbort) watchAbort.abort();
+    current = stateFromRecord(rec);
+    render(current);
+    $("play").scrollIntoView({ behavior: "smooth" });
+  } catch (e) { banner("Cannot open task: " + e.message); }
+}
+
+$("run-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const prompt = $("prompt").value.trim();
+  const target = $("target").value;
+  if (!prompt || !target) return;
+  const [kind, name] = [target.slice(0, target.indexOf(":")), target.slice(target.indexOf(":") + 1)];
+  const body = { prompt, wait: false, source: "ui" };
+  body[kind] = name;
+  $("run-btn").disabled = true;
+  try {
+    const res = await api("/api/tasks", { method: "POST", body: JSON.stringify(body) });
+    const data = await res.json();
+    if (!res.ok) { banner((data.error && data.error.message) || "Request failed"); return; }
+    banner("");
+    watch(data.id);
+  } catch (err) {
+    banner("Request failed: " + err.message);
+  } finally {
+    $("run-btn").disabled = false;
+  }
+});
+$("prompt").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) $("run-form").requestSubmit(); });
+
+refreshAll();
+setInterval(refreshCluster, 3000);
+setInterval(refreshRecent, 5000);
+setInterval(refreshTeams, 15000);
+</script>
+</body>
+</html>

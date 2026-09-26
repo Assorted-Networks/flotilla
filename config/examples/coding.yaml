@@ -1,0 +1,75 @@
+# Example: a coding-focused cluster.
+# Use it with FLOTILLA_CONFIG=/app/config/examples/coding.yaml, or copy the
+# parts you want into config/flotilla.yaml.
+#
+# Models (pull on the machines that should serve them):
+#   qwen2.5-coder:7b (4.7 GB), qwen3.5:9b (6.6 GB), qwen3.5:4b (3.4 GB), granite4.2:8b (5.3 GB)
+
+cluster:
+  request_timeout: 600
+
+defaults:
+  temperature: 0.2
+  max_tokens: 3072
+  reasoning_effort: none
+
+members:
+  coder:
+    model: [qwen2.5-coder:7b, qwen3.5:9b, qwen3.5:4b]
+    description: Writes working code with brief explanations.
+    system: You are a senior software engineer. Write correct, idiomatic, well-structured code.
+  architect:
+    model: [qwen3.5:9b, qwen3.5:4b]
+    description: Designs interfaces, data models and module boundaries.
+  tester:
+    model: [granite4.2:8b, qwen3.5:4b]
+    description: Writes unit tests and lists edge cases.
+  reviewer-a:
+    model: [qwen3.5:9b, qwen3.5:4b]
+    temperature: 0.0
+    system: You review code for bugs, security problems and missing edge cases.
+  reviewer-b:
+    model: [granite4.2:8b, qwen3.5:4b]
+    temperature: 0.0
+    system: You review code for readability, naming and unnecessary complexity.
+
+teams:
+  build:
+    description: Plan the change, write the parts in parallel (design, code, tests), then assemble.
+    strategy: plan
+    planner: architect
+    workers: [architect, coder, tester]
+    synthesizer: coder
+    max_subtasks: 4
+
+  review:
+    description: Write code, get two independent reviews, revise until both approve.
+    strategy: critique
+    writer: coder
+    critics: [reviewer-a, reviewer-b]
+    max_rounds: 2
+
+  fix:
+    description: Draft a fix, then have a second model check it and return the corrected version.
+    strategy: pipeline
+    stages:
+      - member: coder
+        instruction: Find the cause of the problem and write the fix.
+      - member: reviewer-a
+        instruction: Check the fix for mistakes and missing cases. Reply with only the corrected, complete answer.
+
+  code:
+    description: Routes each request to the right coding team.
+    strategy: route
+    router: {model: [qwen3.5:4b], temperature: 0.0, max_tokens: 64}
+    default: review
+    routes:
+      - name: build
+        description: New features or programs with several parts.
+        target: team:build
+      - name: review
+        description: A single function, script or snippet to write or improve.
+        target: team:review
+      - name: fix
+        description: A bug, error message or failing test to fix.
+        target: team:fix

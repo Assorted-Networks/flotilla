@@ -1,0 +1,56 @@
+# A worker machine: Ollama + the Flotilla agent. Run this on every machine
+# that should contribute models to the cluster.
+#
+#   cp .env.example .env        # set COORDINATOR_URL, CLUSTER_TOKEN, NODE_NAME, ADVERTISE_URL
+#   docker compose up -d --build
+#   NVIDIA GPU: docker compose -f docker-compose.yml -f ../gpu/nvidia.yml up -d --build
+#   AMD GPU:    docker compose -f docker-compose.yml -f ../gpu/amd.yml up -d --build
+name: flotilla-node
+
+services:
+  ollama:
+    image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
+    restart: unless-stopped
+    environment:
+      OLLAMA_CONTEXT_LENGTH: ${OLLAMA_CONTEXT_LENGTH:-16384}
+      OLLAMA_NUM_PARALLEL: ${OLLAMA_NUM_PARALLEL:-2}
+      OLLAMA_MAX_LOADED_MODELS: ${OLLAMA_MAX_LOADED_MODELS:-3}
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-30m}
+      OLLAMA_NO_CLOUD: "1"
+    volumes:
+      - ollama:/root/.ollama
+    # Not published: Ollama has no authentication. The agent fronts it.
+
+  agent:
+    build: ../..
+    image: flotilla:local
+    command: ["agent"]
+    restart: unless-stopped
+    depends_on: [ollama]
+    environment:
+      FLOTILLA_COORDINATOR_URL: ${COORDINATOR_URL:?set COORDINATOR_URL in .env}
+      FLOTILLA_CLUSTER_TOKEN: ${CLUSTER_TOKEN:?set CLUSTER_TOKEN in .env}
+      FLOTILLA_NODE_NAME: ${NODE_NAME:?set NODE_NAME in .env}
+      # How the coordinator reaches this agent, e.g. http://192.168.1.21:8801
+      # (empty = use the address the heartbeats come from).
+      FLOTILLA_ADVERTISE_URL: ${ADVERTISE_URL:-}
+      FLOTILLA_BACKEND: ollama
+      FLOTILLA_BACKEND_URL: http://ollama:11434
+      FLOTILLA_PULL_MODELS: ${PULL_MODELS:-qwen3.5:4b,granite4.2:3b,ministral-3:3b}
+      FLOTILLA_MAX_CONCURRENCY: ${MAX_CONCURRENCY:-2}
+      FLOTILLA_NODE_LABELS: ${NODE_LABELS:-}
+      FLOTILLA_PORT: "8801"
+      FLOTILLA_ADVERTISE_PORT: ${AGENT_PORT:-8801}
+      FLOTILLA_TLS_CERT: ${TLS_CERT:-}
+      FLOTILLA_TLS_KEY: ${TLS_KEY:-}
+      FLOTILLA_CA_FILE: ${CA_FILE:-}
+    ports:
+      - "${AGENT_PORT:-8801}:8801"
+    healthcheck:
+      test: ["CMD", "python", "-m", "flotilla", "healthcheck", "--port", "8801"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  ollama:

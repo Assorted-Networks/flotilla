@@ -1,0 +1,51 @@
+# The coordinator on its own (for a machine that runs no models, or when the
+# models on this machine are started separately with deploy/node).
+#
+#   cp .env.example .env        # set CLUSTER_TOKEN and API_KEYS
+#   docker compose up -d --build
+#   docker compose --profile ui up -d    # also start Open WebUI on :3000
+name: flotilla-coordinator
+
+services:
+  coordinator:
+    build: ../..
+    image: flotilla:local
+    command: ["coordinator"]
+    restart: unless-stopped
+    environment:
+      FLOTILLA_CLUSTER_TOKEN: ${CLUSTER_TOKEN:?set CLUSTER_TOKEN in .env}
+      FLOTILLA_API_KEYS: ${API_KEYS:-}
+      FLOTILLA_CLUSTER_NAME: ${CLUSTER_NAME:-flotilla}
+      FLOTILLA_LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Optional built-in TLS (or put Caddy/nginx in front instead):
+      FLOTILLA_TLS_CERT: ${TLS_CERT:-}
+      FLOTILLA_TLS_KEY: ${TLS_KEY:-}
+      FLOTILLA_CA_FILE: ${CA_FILE:-}
+    volumes:
+      - ../../config:/app/config:ro
+      - coordinator-data:/data
+      # - ./certs:/certs:ro
+    ports:
+      - "${COORDINATOR_PORT:-8800}:8800"
+
+  open-webui:
+    profiles: ["ui"]
+    image: ${OPEN_WEBUI_IMAGE:-ghcr.io/open-webui/open-webui:main}
+    restart: unless-stopped
+    depends_on: [coordinator]
+    environment:
+      OPENAI_API_BASE_URL: http://coordinator:8800/v1
+      OPENAI_API_KEY: ${WEBUI_API_KEY:-not-needed}
+      ENABLE_OLLAMA_API: "false"
+      # Titles, tags and follow-up suggestions go to one small model instead
+      # of running a whole team for each of them.
+      TASK_MODEL_EXTERNAL: ${WEBUI_TASK_MODEL:-qwen3.5:4b}
+      ENABLE_AUTOCOMPLETE_GENERATION: "false"
+    volumes:
+      - open-webui:/app/backend/data
+    ports:
+      - "${WEBUI_PORT:-3000}:8080"
+
+volumes:
+  coordinator-data:
+  open-webui:

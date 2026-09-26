@@ -1,0 +1,43 @@
+# Example: a cluster of CPU-only machines with 8-16 GB of RAM each
+# (old laptops, mini PCs, NAS boxes). Smaller models, fewer steps.
+#
+# Pull on each machine (about 4.7-7 GB):   qwen3.5:2b, granite4.2:3b, llama3.2:3b
+# and on the strongest machine:             qwen3.5:4b
+
+cluster:
+  request_timeout: 900     # CPUs are slow on long prompts
+  queue_timeout: 600
+
+defaults:
+  temperature: 0.6
+  max_tokens: 1024
+  reasoning_effort: none
+
+members:
+  qwen: {model: [qwen3.5:2b, qwen3.5:4b]}
+  granite: {model: granite4.2:3b}
+  llama: {model: llama3.2:3b}
+  writer:
+    model: [qwen3.5:4b, granite4.2:3b]
+    temperature: 0.3
+
+teams:
+  moa:
+    description: Two small models answer in parallel, a third merges them.
+    strategy: mixture
+    proposers: [qwen, llama]
+    aggregator: writer
+
+  vote:
+    description: Three answers, the most common one wins (no extra judge call).
+    strategy: vote
+    voters: [qwen, granite, llama]
+
+  pipeline:
+    description: Draft and then check, on two different machines.
+    strategy: pipeline
+    stages:
+      - member: qwen
+        instruction: Answer the request completely.
+      - member: granite
+        instruction: Correct any mistakes in the answer. Reply with only the corrected answer.

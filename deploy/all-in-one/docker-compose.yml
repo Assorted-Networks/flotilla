@@ -1,0 +1,88 @@
+# Everything on one machine: coordinator + Ollama + agent (+ Open WebUI).
+# This is the "head" machine; add more machines later with deploy/node.
+#
+#   cp .env.example .env        # then set CLUSTER_TOKEN (and API_KEYS)
+#   docker compose up -d --build
+#   docker compose --profile ui up -d          # also start Open WebUI on :3000
+#   NVIDIA GPU: docker compose -f docker-compose.yml -f ../gpu/nvidia.yml up -d --build
+#   AMD GPU:    docker compose -f docker-compose.yml -f ../gpu/amd.yml up -d --build
+name: flotilla
+
+services:
+  coordinator:
+    build: ../..
+    image: flotilla:local
+    command: ["coordinator"]
+    restart: unless-stopped
+    environment:
+      FLOTILLA_CLUSTER_TOKEN: ${CLUSTER_TOKEN:?set CLUSTER_TOKEN in .env}
+      FLOTILLA_API_KEYS: ${API_KEYS:-}
+      FLOTILLA_CLUSTER_NAME: ${CLUSTER_NAME:-flotilla}
+      FLOTILLA_LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      # Edit ../../config/flotilla.yaml, then run `flotilla reload` (no restart needed).
+      - ../../config:/app/config:ro
+      - coordinator-data:/data
+    ports:
+      - "${COORDINATOR_PORT:-8800}:8800"
+
+  ollama:
+    image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
+    restart: unless-stopped
+    environment:
+      # Team prompts carry several answers at once; 4096 (Ollama's default) is too small.
+      OLLAMA_CONTEXT_LENGTH: ${OLLAMA_CONTEXT_LENGTH:-16384}
+      OLLAMA_NUM_PARALLEL: ${OLLAMA_NUM_PARALLEL:-2}
+      OLLAMA_MAX_LOADED_MODELS: ${OLLAMA_MAX_LOADED_MODELS:-3}
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-30m}
+      OLLAMA_NO_CLOUD: "1"
+    volumes:
+      - ollama:/root/.ollama
+    # No ports: only the agent talks to Ollama.
+
+  agent:
+    build: ../..
+    image: flotilla:local
+    command: ["agent"]
+    restart: unless-stopped
+    depends_on: [coordinator, ollama]
+    environment:
+      FLOTILLA_COORDINATOR_URL: http://coordinator:8800
+      FLOTILLA_CLUSTER_TOKEN: ${CLUSTER_TOKEN:?set CLUSTER_TOKEN in .env}
+      FLOTILLA_NODE_NAME: ${NODE_NAME:-head}
+      FLOTILLA_ADVERTISE_URL: http://agent:8801
+      FLOTILLA_BACKEND: ollama
+      FLOTILLA_BACKEND_URL: http://ollama:11434
+      FLOTILLA_PULL_MODELS: ${PULL_MODELS:-qwen3.5:4b,granite4.2:3b,ministral-3:3b}
+      FLOTILLA_MAX_CONCURRENCY: ${MAX_CONCURRENCY:-2}
+      FLOTILLA_NODE_LABELS: ${NODE_LABELS:-}
+      FLOTILLA_PORT: "8801"
+    healthcheck:
+      test: ["CMD", "python", "-m", "flotilla", "healthcheck", "--port", "8801"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  open-webui:
+    profiles: ["ui"]
+    image: ${OPEN_WEBUI_IMAGE:-ghcr.io/open-webui/open-webui:main}
+    restart: unless-stopped
+    depends_on: [coordinator]
+    environment:
+      OPENAI_API_BASE_URL: http://coordinator:8800/v1
+      # Must be one of API_KEYS when API_KEYS is set.
+      OPENAI_API_KEY: ${WEBUI_API_KEY:-not-needed}
+      ENABLE_OLLAMA_API: "false"
+      # Titles, tags and follow-up suggestions go to one small model instead
+      # of running a whole team for each of them.
+      TASK_MODEL_EXTERNAL: ${WEBUI_TASK_MODEL:-qwen3.5:4b}
+      ENABLE_AUTOCOMPLETE_GENERATION: "false"
+    volumes:
+      - open-webui:/app/backend/data
+    ports:
+      - "${WEBUI_PORT:-3000}:8080"
+
+volumes:
+  coordinator-data:
+  ollama:
+  open-webui:

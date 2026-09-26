@@ -326,6 +326,8 @@ class Coordinator:
         self.check_client(request)
         body = await self.read_json(request)
         model = body.get("model")
+        if not isinstance(model, str):
+            raise HTTPProblem(400, "`model` must be a string")
         messages = self._validate_messages(body.get("messages"))
         team = self.team_for(model)
         if team:
@@ -335,10 +337,15 @@ class Coordinator:
         available = [f"{self.cfg.server.team_prefix}{t}" for t in self.cfg.teams]
         raise HTTPProblem(404, f"model '{model}' not found. Teams: {', '.join(available) or 'none'}", "model_not_found")
 
+    @staticmethod
+    def _wants_usage(body: dict) -> bool:
+        options = body.get("stream_options")
+        return isinstance(options, dict) and bool(options.get("include_usage"))
+
     async def team_chat(self, body: dict, team: str, messages: list[dict]) -> Response:
         assert self.dispatcher
         stream = bool(body.get("stream"))
-        include_usage = bool((body.get("stream_options") or {}).get("include_usage"))
+        include_usage = self._wants_usage(body)
         max_tokens = body.get("max_completion_tokens") or body.get("max_tokens")
         overrides = {"max_tokens": max_tokens} if isinstance(max_tokens, int) and max_tokens > 0 else {}
         model_id = body.get("model")
@@ -492,6 +499,10 @@ class Coordinator:
             fail(DispatchError("empty stream"))
             return oai.error(502, "empty stream", headers=headers)
 
+        # The dispatcher asks every node for usage; pass the usage-only chunk
+        # (empty `choices`) on only to clients that asked for it, as OpenAI does.
+        include_usage = self._wants_usage(body)
+
         async def generate() -> AsyncIterator[bytes]:
             parts: list[str] = []
             usage = Usage()
@@ -504,6 +515,8 @@ class Coordinator:
                             parts.append(c)
                         if u:
                             usage = u
+                        if not include_usage and not payload.get("choices") and "usage" in payload:
+                            continue
                         yield oai.sse(payload)
                     elif kind == "end":
                         yield oai.SSE_DONE
@@ -604,6 +617,9 @@ class Coordinator:
         messages = self._validate_messages(messages)
         team = body.get("team")
         model = body.get("model")
+        for key, value in (("team", team), ("model", model)):
+            if value is not None and not isinstance(value, str):
+                raise HTTPProblem(400, f"`{key}` must be a string")
         if team and team.startswith(self.cfg.server.team_prefix):
             team = team[len(self.cfg.server.team_prefix):]
         if team and team not in self.cfg.teams:
@@ -628,8 +644,10 @@ class Coordinator:
                 self.metrics.request("api", target, "error")
             except asyncio.CancelledError:
                 raise
-            except Exception:  # noqa: BLE001 - recorded on the task
+            except Exception as exc:  # noqa: BLE001 - recorded on the task
                 log.exception("task %s failed", task.id)
+                if task.status == "running":
+                    task.finish("error", error=f"internal error: {exc}")
             finally:
                 self.tasks.persist(task)
 
@@ -646,15 +664,18 @@ class Coordinator:
         task.emit("task.started", target=model, kind="model")
         try:
             out = await ctx.call(MemberConfig(model=model), messages, role="model", final=True, sink=sink)
-        except StepFailed as exc:
-            task.finish("error", error=str(exc))
+        except (StepFailed, TaskTimeout) as exc:
+            task.finish("error", error=str(exc) or "task exceeded its time limit")
             raise
         task.finish("ok", output=out.content)
 
     async def api_list_tasks(self, request: Request) -> Response:
         self.check_client(request)
-        limit = int(request.query_params.get("limit", "50"))
-        return JSONResponse({"tasks": self.tasks.recent(limit)})
+        try:
+            limit = int(request.query_params.get("limit", "50"))
+        except ValueError:
+            raise HTTPProblem(400, "`limit` must be a whole number")
+        return JSONResponse({"tasks": self.tasks.recent(max(1, limit))})
 
     async def api_get_task(self, request: Request) -> Response:
         self.check_client(request)
@@ -700,8 +721,13 @@ class Coordinator:
         model = str(body.get("model") or "").strip()
         if not model:
             raise HTTPProblem(400, "give `model`")
-        wanted = set(body.get("nodes") or [])
-        results = {}
+        nodes = body.get("nodes") or []
+        if isinstance(nodes, str):
+            nodes = [nodes]
+        if not isinstance(nodes, list):
+            raise HTTPProblem(400, "`nodes` must be a list of node names")
+        wanted = {str(n) for n in nodes}
+        results = {name: {"ok": False, "error": "unknown node"} for name in wanted if name not in self.registry.nodes}
         for node in list(self.registry.nodes.values()):
             if wanted and node.name not in wanted:
                 continue

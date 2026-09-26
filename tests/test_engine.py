@@ -193,9 +193,14 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         stages = self.steps(task, "stage")
         self.assertEqual([s.member for s in stages], ["qa", "qb", "qc"])
         self.assertIn("small-c", out)
-        # later stages get the previous version appended to the user's turn
-        body = self.fakes["node-b"].last_bodies[-1] if self.fakes["node-b"].last_bodies else None
-        self.assertIsNotNone(body)
+        # later stages get the previous version appended to the user's turn,
+        # on whichever machines the scheduler picked
+        bodies = [b for fake in self.fakes.values() for b in fake.last_bodies]
+        later = [b for b in bodies if "current version from the previous step" in b["messages"][-1]["content"]]
+        self.assertEqual(len(later), 2, bodies)
+        for body in later:
+            self.assertEqual([m["role"] for m in body["messages"]], ["user"])
+            self.assertTrue(body["messages"][0]["content"].startswith("How do heat pumps work?"))
 
     async def test_route_to_nested_team(self):
         out, task = await self.run_team("route", prompt="Please build a migration plan")

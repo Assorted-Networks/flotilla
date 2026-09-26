@@ -143,12 +143,16 @@ class Registry:
 
     # -- membership ---------------------------------------------------------
 
+    def _static_key(self, s: StaticNodeConfig) -> str | None:
+        # A static agent checks the cluster token like any other agent.
+        return s.api_key or (self.agent_token if s.kind == "agent" else None)
+
     def add_static(self, s: StaticNodeConfig) -> Node:
         node = Node(
             name=s.name,
             url=s.url.rstrip("/"),
             kind=s.kind,
-            api_key=s.api_key,
+            api_key=self._static_key(s),
             static=True,
             capacity=s.max_concurrency,
             models=_models_from_list(s.models),
@@ -170,7 +174,7 @@ class Registry:
             if old is None or not old.static or old.url != s.url.rstrip("/") or old.kind != s.kind:
                 self.add_static(s)
             else:
-                old.capacity, old.labels, old.api_key = s.max_concurrency, dict(s.labels), s.api_key
+                old.capacity, old.labels, old.api_key = s.max_concurrency, dict(s.labels), self._static_key(s)
         self._wake()
 
     def upsert_agent(self, hb: dict[str, Any], client_host: str | None) -> Node:

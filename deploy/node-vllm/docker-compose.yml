@@ -1,0 +1,63 @@
+# A worker machine serving one model with vLLM (NVIDIA GPU) + the Flotilla agent.
+# vLLM batches many parallel requests on one GPU, so this suits a machine
+# that should take a large share of the team's calls.
+#
+#   cp .env.example .env
+#   docker compose up -d --build
+#
+# The agent advertises SERVED_NAME. Reference that name in config/flotilla.yaml,
+# e.g. `model: [qwen3.5:4b, qwen3-4b-vllm]` to let a member use either backend.
+name: flotilla-node-vllm
+
+services:
+  vllm:
+    image: ${VLLM_IMAGE:-vllm/vllm-openai:latest}
+    restart: unless-stopped
+    ipc: host
+    command:
+      - ${HF_MODEL:-Qwen/Qwen3-4B-Instruct-2507}
+      - --served-model-name
+      - ${SERVED_NAME:-qwen3-4b-vllm}
+      - --max-model-len
+      - "${MAX_MODEL_LEN:-16384}"
+      - --gpu-memory-utilization
+      - "${GPU_MEMORY_UTILIZATION:-0.85}"
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  agent:
+    build: ../..
+    image: flotilla:local
+    command: ["agent"]
+    restart: unless-stopped
+    depends_on: [vllm]
+    environment:
+      FLOTILLA_COORDINATOR_URL: ${COORDINATOR_URL:?set COORDINATOR_URL in .env}
+      FLOTILLA_CLUSTER_TOKEN: ${CLUSTER_TOKEN:?set CLUSTER_TOKEN in .env}
+      FLOTILLA_NODE_NAME: ${NODE_NAME:?set NODE_NAME in .env}
+      FLOTILLA_ADVERTISE_URL: ${ADVERTISE_URL:-}
+      FLOTILLA_BACKEND: openai
+      FLOTILLA_BACKEND_URL: http://vllm:8000
+      FLOTILLA_MAX_CONCURRENCY: ${MAX_CONCURRENCY:-8}
+      FLOTILLA_NODE_LABELS: ${NODE_LABELS:-gpu=nvidia}
+      FLOTILLA_PORT: "8801"
+      FLOTILLA_ADVERTISE_PORT: ${AGENT_PORT:-8801}
+    ports:
+      - "${AGENT_PORT:-8801}:8801"
+    healthcheck:
+      test: ["CMD", "python", "-m", "flotilla", "healthcheck", "--port", "8801"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  hf-cache:

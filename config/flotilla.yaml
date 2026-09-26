@@ -1,0 +1,133 @@
+# Flotilla team configuration (read by the coordinator).
+#
+# - `members` are models with a role: a model name (or a list of fallbacks,
+#   first available wins), optional system prompt and generation settings.
+# - `teams` combine members with a strategy. Each team appears to OpenAI
+#   clients as the model "team/<name>".
+# - Anywhere a member is expected you can also write `team:<name>` to use a
+#   whole team as one member, or define a member inline.
+#
+# Validate after editing:   python -m flotilla check-config config/flotilla.yaml
+# Apply without restarting: python -m flotilla reload   (or POST /api/config/reload)
+# ${VAR} and ${VAR:-default} are replaced from the environment.
+
+server:
+  expose_models: true        # also list every node model in /v1/models (load-balanced)
+  progress: reasoning        # stream team progress as a "thinking" block (or: none)
+  task_timeout: 900          # seconds for a whole team run
+
+cluster:
+  heartbeat_timeout: 30      # an agent silent this long is treated as offline
+  request_timeout: 300       # one model call
+  queue_timeout: 180         # how long a call may wait for a free slot
+  max_retries: 2             # failover attempts on other nodes
+  fallback_on_busy: false    # true: use a member's fallback model when the first choice is busy
+  # Inference servers without an agent (the coordinator calls them directly):
+  static_nodes: []
+  #  - name: gpu-box
+  #    url: http://192.168.1.50:11434     # Ollama; must be reachable from the coordinator
+  #    kind: ollama                       # ollama | openai (vLLM, llama.cpp, LM Studio...)
+  #    max_concurrency: 4
+  #    labels: {gpu: "true"}
+
+# Applied to every member unless the member overrides it.
+defaults:
+  temperature: 0.7
+  max_tokens: 1536
+  # Small "thinking" models (qwen3.5, gemma4, granite4.2...) are much faster
+  # with thinking off; set to low/medium/high on members that should think.
+  reasoning_effort: none
+
+members:
+  qwen:
+    model: qwen3.5:4b
+    description: Well-rounded generalist; good at structured output, maths and code.
+  granite:
+    model: granite4.2:3b
+    description: Careful instruction follower; good at summaries and business writing.
+  ministral:
+    model: ministral-3:3b
+    description: Fast generalist with broad world knowledge; good at explanations.
+  # The member that writes final answers. Uses the largest model any node has.
+  writer:
+    model: [qwen3.5:9b, gemma4:12b, granite4.2:8b, ministral-3:8b, qwen3.5:4b]
+    temperature: 0.4
+    max_tokens: 2048
+    description: Strongest available model; merges and polishes.
+  # Deterministic helpers for planning, routing and judging.
+  strategist:
+    model: [qwen3.5:9b, qwen3.5:4b]
+    temperature: 0.2
+    description: Breaks requests into subtasks.
+  judge:
+    model: [qwen3.5:9b, granite4.2:8b, qwen3.5:4b]
+    temperature: 0.0
+    max_tokens: 512
+  router:
+    model: [qwen3.5:4b, granite4.2:3b]
+    temperature: 0.0
+    max_tokens: 64
+
+teams:
+  moa:
+    description: Mixture of agents. Three small models answer in parallel on different machines; the writer merges the best parts.
+    strategy: mixture
+    proposers: [qwen, granite, ministral]
+    aggregator: writer
+
+  council:
+    description: Three models answer, review each other's answers anonymously, then a chair writes the final answer.
+    strategy: council
+    members: [qwen, granite, ministral]
+    chairman: writer
+
+  planner:
+    description: A planner splits the request into subtasks, workers solve them in parallel, the writer assembles the result.
+    strategy: plan
+    planner: strategist
+    workers: [qwen, granite, ministral]
+    synthesizer: writer
+    max_subtasks: 5
+
+  critique:
+    description: The writer drafts, two small critics review, the writer revises until they approve (at most two rounds).
+    strategy: critique
+    writer: writer
+    critics: [granite, ministral]
+    max_rounds: 2
+
+  vote:
+    description: Several answers, a judge picks the best one. Good for short, checkable answers.
+    strategy: vote
+    voters: [qwen, granite, ministral]
+    judge: judge
+
+  pipeline:
+    description: Draft, fact-check, then polish, each step on a different model.
+    strategy: pipeline
+    stages:
+      - member: qwen
+        instruction: Write a complete first draft that answers the request.
+      - member: granite
+        instruction: Check the draft for factual errors, gaps and unclear steps. Reply with only the corrected version.
+      - member: ministral
+        instruction: Edit for clarity and concision without dropping information. Reply with only the final text.
+
+  auto:
+    description: A small router picks the right team for each request.
+    strategy: route
+    router: router
+    default: deep
+    routes:
+      - name: quick
+        description: Greetings, small talk, short factual questions and simple lookups.
+        target: qwen
+      - name: deep
+        description: Open questions that benefit from several viewpoints, explanations and advice.
+        target: team:moa
+      - name: build
+        description: Multi-part work such as plans, reports, designs, or code with several components.
+        target: team:planner
+      - name: check
+        description: Requests where correctness matters most, such as calculations or precise answers.
+        target: team:vote

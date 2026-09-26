@@ -1,0 +1,80 @@
+# A simulated three-machine cluster with fake models: no GPU, no downloads.
+# Use it to try the dashboard, the API and failover before touching real hardware.
+#
+#   docker compose up -d --build
+#   open http://localhost:8800         (dashboard)
+#   docker compose stop node-b-agent   (watch the team route around it)
+name: flotilla-sim
+
+x-agent: &agent
+  build: ../..
+  image: flotilla:local
+  command: ["agent"]
+  restart: unless-stopped
+  depends_on: [coordinator]
+  healthcheck:
+    test: ["CMD", "python", "-m", "flotilla", "healthcheck", "--port", "8801"]
+    interval: 10s
+    timeout: 5s
+    retries: 3
+
+x-agent-env: &agent-env
+  FLOTILLA_COORDINATOR_URL: http://coordinator:8800
+  FLOTILLA_CLUSTER_TOKEN: sim-token
+  FLOTILLA_HEARTBEAT_INTERVAL: "2"
+  FLOTILLA_PORT: "8801"
+
+x-fake: &fake
+  build: ../..
+  image: flotilla:local
+  restart: unless-stopped
+  healthcheck:
+    disable: true
+
+services:
+  coordinator:
+    build: ../..
+    image: flotilla:local
+    command: ["coordinator"]
+    environment:
+      FLOTILLA_CLUSTER_TOKEN: sim-token
+      FLOTILLA_CLUSTER_NAME: simulation
+    ports:
+      - "${COORDINATOR_PORT:-8800}:8800"
+
+  node-a-models:
+    <<: *fake
+    command: ["fake-backend", "--host", "0.0.0.0", "--name", "node-a", "--latency", "0.8",
+              "--models", "qwen3.5:4b,granite4.2:3b,ministral-3:3b"]
+  node-a-agent:
+    <<: *agent
+    environment:
+      <<: *agent-env
+      FLOTILLA_NODE_NAME: node-a
+      FLOTILLA_ADVERTISE_URL: http://node-a-agent:8801
+      FLOTILLA_BACKEND_URL: http://node-a-models:11434
+
+  node-b-models:
+    <<: *fake
+    command: ["fake-backend", "--host", "0.0.0.0", "--name", "node-b", "--latency", "1.2",
+              "--models", "qwen3.5:4b,granite4.2:3b,qwen3.5:9b"]
+  node-b-agent:
+    <<: *agent
+    environment:
+      <<: *agent-env
+      FLOTILLA_NODE_NAME: node-b
+      FLOTILLA_ADVERTISE_URL: http://node-b-agent:8801
+      FLOTILLA_BACKEND_URL: http://node-b-models:11434
+      FLOTILLA_NODE_LABELS: gpu=simulated
+
+  node-c-models:
+    <<: *fake
+    command: ["fake-backend", "--host", "0.0.0.0", "--name", "node-c", "--latency", "1.0",
+              "--models", "ministral-3:3b,granite4.2:3b,qwen3.5:4b"]
+  node-c-agent:
+    <<: *agent
+    environment:
+      <<: *agent-env
+      FLOTILLA_NODE_NAME: node-c
+      FLOTILLA_ADVERTISE_URL: http://node-c-agent:8801
+      FLOTILLA_BACKEND_URL: http://node-c-models:11434

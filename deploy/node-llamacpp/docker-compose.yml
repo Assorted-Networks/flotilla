@@ -1,0 +1,60 @@
+# A worker machine serving one GGUF model with llama.cpp's server + the agent.
+# Good for small CPU-only boxes and single-board computers, and for GPUs via
+# the -cuda, -rocm or -vulkan server images.
+#
+#   cp .env.example .env
+#   docker compose up -d --build
+name: flotilla-node-llamacpp
+
+services:
+  llamacpp:
+    image: ${LLAMACPP_IMAGE:-ghcr.io/ggml-org/llama.cpp:server}
+    restart: unless-stopped
+    environment:
+      LLAMA_CACHE: /models
+    command:
+      - -hf
+      - ${HF_MODEL:-ggml-org/gemma-3-1b-it-GGUF}
+      - --alias
+      - ${SERVED_NAME:-gemma-3-1b}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      # Total context, shared by the parallel slots.
+      - -c
+      - "${CTX_SIZE:-16384}"
+      - --parallel
+      - "${PARALLEL:-2}"
+      - -ngl
+      - "${GPU_LAYERS:-0}"
+    volumes:
+      - models:/models
+
+  agent:
+    build: ../..
+    image: flotilla:local
+    command: ["agent"]
+    restart: unless-stopped
+    depends_on: [llamacpp]
+    environment:
+      FLOTILLA_COORDINATOR_URL: ${COORDINATOR_URL:?set COORDINATOR_URL in .env}
+      FLOTILLA_CLUSTER_TOKEN: ${CLUSTER_TOKEN:?set CLUSTER_TOKEN in .env}
+      FLOTILLA_NODE_NAME: ${NODE_NAME:?set NODE_NAME in .env}
+      FLOTILLA_ADVERTISE_URL: ${ADVERTISE_URL:-}
+      FLOTILLA_BACKEND: openai
+      FLOTILLA_BACKEND_URL: http://llamacpp:8080
+      FLOTILLA_MAX_CONCURRENCY: ${PARALLEL:-2}
+      FLOTILLA_NODE_LABELS: ${NODE_LABELS:-}
+      FLOTILLA_PORT: "8801"
+      FLOTILLA_ADVERTISE_PORT: ${AGENT_PORT:-8801}
+    ports:
+      - "${AGENT_PORT:-8801}:8801"
+    healthcheck:
+      test: ["CMD", "python", "-m", "flotilla", "healthcheck", "--port", "8801"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  models:

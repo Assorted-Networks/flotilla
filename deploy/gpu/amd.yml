@@ -1,0 +1,10 @@
+# Run Ollama's ROCm build on AMD GPUs.
+#   docker compose -f docker-compose.yml -f ../gpu/amd.yml up -d
+# If the container cannot open the GPU, add the host's video/render group ids:
+#   group_add: ["44", "993"]    (see: getent group video render)
+services:
+  ollama:
+    image: ${OLLAMA_ROCM_IMAGE:-ollama/ollama:rocm}
+    devices:
+      - /dev/kfd
+      - /dev/dri
